@@ -52,4 +52,16 @@ URL: http://localhost:3000/order/v10089015vdb-01
 
 Remove o pedido e todos os seus itens associados (Cascading Delete via código).
 
+Autenticação
+A API utiliza autenticação via **Bearer Token (JWT)**. Para acessar os endpoints de pedidos, é necessário obter um token válido.
+
+1. Acesse a rota `POST /login`.
+2. Utilize as credenciais padrão:
+   - **Usuário:** `admin`
+   - **Senha:** `1234`
+   
+3. Copie o token retornado e utilize-o no header de autorização: `Authorization: Bearer <seu_token>`.
+
+
+
 O projeto foi estruturado para garantir a integridade dos dados usando transações SQL (Knex Transactions), garantindo que um pedido nunca seja criado sem seus respectivos itens, mantendo a consistência analítica do sistema.
