@@ -1,22 +1,72 @@
 const express = require('express');
 const db = require('./database');
 const swaggerUi = require('swagger-ui-express');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 app.use(express.json());
 
-// --- 1. CONFIGURAÇÃO DO SWAGGER ---
+const SECRET_KEY = "vitor_Jitterbit";
+
+// --- 1. MIDDLEWARE DE AUTENTICAÇÃO ---
+function verifyJWT(req, res, next) {
+  const token = req.headers['authorization'];
+
+  if (!token) return res.status(401).json({ message: "Token não fornecido" });
+
+  // Remove o prefixo 'Bearer ' caso exista
+  const pureToken = token.startsWith('Bearer ') ? token.split(' ')[1] : token;
+
+  jwt.verify(pureToken, SECRET_KEY, (err, decoded) => {
+    if (err) return res.status(500).json({ message: "Token inválido ou expirado" });
+    
+    req.userId = decoded.user;
+    next();
+  });
+}
+
+// --- 2. CONFIGURAÇÃO DO SWAGGER (COM SEGURANÇA) ---
 const swaggerDocument = {
   openapi: "3.0.0",
   info: {
     title: "API de Pedidos - Desafio Jitterbit",
-    description: "Documentação da API de pedidos com mapeamento de dados para SQL.",
+    description: "API de pedidos com mapeamento de dados para SQL e Autenticação JWT.",
     version: "1.0.0"
   },
+  components: {
+    securitySchemes: {
+      bearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT'
+      }
+    }
+  },
+  security: [{ bearerAuth: [] }],
   paths: {
+    "/login": {
+      post: {
+        summary: "Gera um token de acesso",
+        security: [], // Aberto ao público
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  username: { type: "string", example: "admin" },
+                  password: { type: "string", example: "1234" }
+                }
+              }
+            }
+          }
+        },
+        responses: { "200": { description: "Token gerado" } }
+      }
+    },
     "/order": {
       post: {
-        summary: "Cria um novo pedido",
+        summary: "Cria um novo pedido (Protegido)",
         requestBody: {
           content: {
             "application/json": {
@@ -32,23 +82,23 @@ const swaggerDocument = {
             }
           }
         },
-        responses: { "201": { description: "Pedido criado com sucesso" } }
+        responses: { "201": { description: "Sucesso" } }
       }
     },
     "/order/list": {
       get: {
-        summary: "Lista todos os pedidos",
+        summary: "Lista todos os pedidos (Protegido)",
         responses: { "200": { description: "Sucesso" } }
       }
     },
     "/order/{id}": {
       get: {
-        summary: "Busca pedido por ID",
+        summary: "Busca pedido por ID (Protegido)",
         parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
-        responses: { "200": { description: "Sucesso" }, "404": { description: "Não encontrado" } }
+        responses: { "200": { description: "Sucesso" } }
       },
       put: {
-        summary: "Atualiza um pedido",
+        summary: "Atualiza um pedido (Protegido)",
         parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
         requestBody: {
           content: { "application/json": { schema: { type: "object", properties: { valorTotal: { type: "number" } } } } }
@@ -56,7 +106,7 @@ const swaggerDocument = {
         responses: { "200": { description: "Atualizado" } }
       },
       delete: {
-        summary: "Exclui um pedido",
+        summary: "Exclui um pedido (Protegido)",
         parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
         responses: { "200": { description: "Excluído" } }
       }
@@ -66,9 +116,23 @@ const swaggerDocument = {
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
-// --- 2. ROTAS DA API ---
+// --- 3. ROTAS DE AUTENTICAÇÃO ---
 
-app.post('/order', async (req, res) => {
+app.post('/login', (req, res) => {
+  const { username, password } = req.body;
+
+  // Validação simples para o desafio
+  if (username === 'admin' && password === '1234') {
+    const token = jwt.sign({ user: username }, SECRET_KEY, { expiresIn: '1h' });
+    return res.json({ auth: true, token });
+  }
+
+  res.status(401).json({ message: "Credenciais inválidas" });
+});
+
+// --- 4. ROTAS DA API PROTEGIDAS PELO verifyJWT ---
+
+app.post('/order', verifyJWT, async (req, res) => {
   try {
     const data = req.body;
     const orderData = {
@@ -95,7 +159,7 @@ app.post('/order', async (req, res) => {
   }
 });
 
-app.get('/order/list', async (req, res) => {
+app.get('/order/list', verifyJWT, async (req, res) => {
   try {
     const orders = await db('Order').select('*');
     res.json(orders);
@@ -104,7 +168,7 @@ app.get('/order/list', async (req, res) => {
   }
 });
 
-app.get('/order/:id', async (req, res) => {
+app.get('/order/:id', verifyJWT, async (req, res) => {
   try {
     const { id } = req.params;
     const order = await db('Order').where({ orderId: id }).first();
@@ -120,7 +184,7 @@ app.get('/order/:id', async (req, res) => {
   }
 });
 
-app.put('/order/:id', async (req, res) => {
+app.put('/order/:id', verifyJWT, async (req, res) => {
   try {
     const { id } = req.params;
     const { valorTotal } = req.body;
@@ -136,7 +200,7 @@ app.put('/order/:id', async (req, res) => {
   }
 });
 
-app.delete('/order/:id', async (req, res) => {
+app.delete('/order/:id', verifyJWT, async (req, res) => {
   try {
     const { id } = req.params;
     await db.transaction(async tr => {
@@ -149,10 +213,10 @@ app.delete('/order/:id', async (req, res) => {
   }
 });
 
-// --- 3. INICIALIZAÇÃO (Apenas um app.listen ao final) ---
+// --- 5. INICIALIZAÇÃO ---
 app.listen(3000, () => {
   console.log('==============================================');
-  console.log('🚀 API DE PEDIDOS ATIVA');
+  console.log('🚀 API COM JWT ATIVA');
   console.log('📂 Local: http://localhost:3000');
   console.log('📝 Swagger: http://localhost:3000/api-docs');
   console.log('==============================================');
